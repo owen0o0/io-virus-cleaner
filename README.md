@@ -262,7 +262,7 @@ https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.0.zip
 1. 改插件头的 `Version` 和 `const VERSION`，两处要一致。
 2. 在 `wp-content/plugins` 目录打包。zip 里的顶层目录必须叫 `io-virus-cleaner`：
    ```
-   zip -r io-virus-cleaner-1.2.0.zip io-virus-cleaner -x '*.DS_Store'
+   zip -r io-virus-cleaner-1.2.0.zip io-virus-cleaner -x '*.DS_Store' -x 'io-virus-cleaner/docs/*' -x 'io-virus-cleaner/.git/*'
    shasum -a 256 io-virus-cleaner-1.2.0.zip     # Linux 用 sha256sum
    ```
 3. 把 zip 传到服务器，再更新 `info.json`（`version`、`download`、`sha256`、`changelog`）。**先传 zip，最后传 `info.json`**，避免用户看到更新却下载不到。
