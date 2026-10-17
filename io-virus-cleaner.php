@@ -2,7 +2,7 @@
 /**
  * Plugin Name: IO Virus Cleaner
  * Description: WordPress 病毒和木马扫描清理：按文件名、内容特征和通用 webshell 写法识别，可以扫描整个 wwwroot，支持命令行。
- * Version: 1.2.0
+ * Version: 1.2.1
  * Author: 一为
  * Author URI: https://www.iotheme.cn/
  * Requires at least: 5.8
@@ -32,6 +32,7 @@ require_once IO_VC_DIR . '/includes/trait-signatures.php';   // 木马特征和�
 require_once IO_VC_DIR . '/includes/trait-scope.php';        // 扫描范围、额外目录、排除目录
 require_once IO_VC_DIR . '/includes/trait-engine.php';       // 分步扫描引擎
 require_once IO_VC_DIR . '/includes/trait-core-check.php';   // WordPress 核心文件校验（可选，要联网）
+require_once IO_VC_DIR . '/includes/trait-cron.php';         // 计划任务：每天自动扫描
 require_once IO_VC_DIR . '/includes/trait-quarantine.php';   // 隔离区
 
 final class IO_Virus_Cleaner {
@@ -45,9 +46,10 @@ final class IO_Virus_Cleaner {
     use IO_VC_Scope;
     use IO_VC_Engine;
     use IO_VC_CoreCheck;
+    use IO_VC_Cron;
     use IO_VC_Quarantine;
 
-    const VERSION = '1.2.0';
+    const VERSION = '1.2.1';
     const SLUG    = 'io-virus-cleaner';
     const UPDATE_URI  = 'https://www.iotheme.cn/io-plugin/io-virus-cleaner/';
     const UPDATE_INFO = 'https://www.iotheme.cn/io-plugin/io-virus-cleaner/info.json';
@@ -72,6 +74,11 @@ final class IO_Virus_Cleaner {
             add_filter('update_plugins_' . parse_url(self::UPDATE_URI, PHP_URL_HOST), array(__CLASS__, 'check_update'), 10, 4);
             add_filter('plugins_api', array(__CLASS__, 'plugin_info'), 10, 3);
             add_filter('upgrader_pre_download', array(__CLASS__, 'verify_package'), 10, 3);
+            // 计划任务由 WP-Cron 触发，同样不一定在后台，放在 is_admin() 判断前面
+            add_action(self::cron_hook(), array(__CLASS__, 'cron_run'));
+            if (function_exists('register_deactivation_hook')) {
+                register_deactivation_hook(IO_VC_FILE, array(__CLASS__, 'cron_clear'));
+            }
         }
         if (!is_admin()) {
             return;
@@ -84,6 +91,9 @@ final class IO_Virus_Cleaner {
         add_action('wp_ajax_io_vc_scan_cancel', array(__CLASS__, 'ajax_scan_cancel'));
         add_action('admin_post_io_vc_clean', array(__CLASS__, 'handle_clean'));
         add_action('admin_post_io_vc_purge_quarantine', array(__CLASS__, 'handle_purge_quarantine'));
+        add_action('admin_post_io_vc_cron_save', array(__CLASS__, 'handle_cron_save'));
+        add_action('admin_post_io_vc_cron_load', array(__CLASS__, 'handle_cron_load'));
+        add_action('admin_init', array(__CLASS__, 'cron_ensure'));
         add_filter('plugin_action_links_' . plugin_basename(IO_VC_FILE), array(__CLASS__, 'action_links'));
     }
 

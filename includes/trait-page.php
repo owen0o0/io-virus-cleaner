@@ -68,6 +68,7 @@ trait IO_VC_Page {
                 <?php submit_button('开始扫描', 'primary', 'submit', false, array('id' => 'io-vc-start')); ?>
                 <button type="button" class="button" id="io-vc-stop" style="display:none">停止</button>
             </form>
+            <?php self::render_cron_panel(); ?>
             <?php self::render_terminal($report); ?>
             <?php if (is_array($report)) : ?>
                 <?php self::render_report($report); ?>

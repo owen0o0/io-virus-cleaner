@@ -199,6 +199,18 @@
 
 四条同时满足才列出。结果原因是「静态链接 ELF；含 WebSocket 与 DNS 解析；会创建文件」。普通的静态链接程序，或只有 HTTPS 字符串的程序，不会被算进去。
 
+## 计划任务：每天自动扫描（可选，默认关闭）
+
+扫描页的「计划任务」里勾选「每天自动扫描一次」并保存，插件会用 WP-Cron 每天站点时间凌晨 3 点左右扫一遍：
+
+- 范围和设置同页面上保存的：额外扫描的目录、排除的目录、是否校验核心文件。
+- 结果存下来，页面上显示上一次自动扫描的时间、耗时和命中数，点「查看这次结果」可以把它放进结果区，像手动扫描一样勾选隔离或删除。
+- 勾选「发现新的高可信命中时发邮件」（默认勾选）：有**新出现**的高可信命中，或核心文件校验有新的异常时，发邮件到站点的管理员邮箱。同样的命中不会每天重复发。「可疑」类不发邮件，只在页面上显示。
+- **只扫描和通知，不会自动删除或隔离任何文件。**
+- 插件停用时会清掉计划任务；开着但任务丢了（清过 cron、迁移过站点），打开后台会自动补上。
+- WP-Cron 靠有人访问站点来触发。访问量很小的站，或在 `wp-config.php` 里设了 `DISABLE_WP_CRON`，要在服务器上用系统计划任务定时访问 `wp-cron.php`，例如每 5 分钟：`*/5 * * * * curl -s https://你的站点/wp-cron.php?doing_wp_cron >/dev/null`。
+- 开着 `open_basedir` 时，自动扫描和网页上一样读不到本站以外的目录；要扫整个 wwwroot，请用服务器上的系统计划任务跑 `php cli.php --dir=/www/wwwroot`。
+
 ## WordPress 核心文件校验（可选，默认关闭）
 
 扫描页「开始扫描」上面有一个复选框「同时校验 WordPress 核心文件」。勾选后，插件会连接 `api.wordpress.org` 取当前版本的官方文件校验值（MD5），对每个 WordPress 站点做两件事：
@@ -240,15 +252,15 @@
 
 ```
 https://www.iotheme.cn/io-plugin/io-virus-cleaner/info.json
-https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.0.zip
+https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.1.zip
 ```
 
 `info.json`（`version`、`download`、`sha256` 必填）：
 
 ```json
 {
-  "version": "1.2.0",
-  "download": "https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.0.zip",
+  "version": "1.2.1",
+  "download": "https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.1.zip",
   "sha256": "zip 文件的 sha256，64 位小写十六进制",
   "homepage": "https://www.iotheme.cn/",
   "requires": "5.8",
@@ -262,8 +274,8 @@ https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.0.zip
 1. 改插件头的 `Version` 和 `const VERSION`，两处要一致。
 2. 在 `wp-content/plugins` 目录打包。zip 里的顶层目录必须叫 `io-virus-cleaner`：
    ```
-   zip -r io-virus-cleaner-1.2.0.zip io-virus-cleaner -x '*.DS_Store' -x 'io-virus-cleaner/docs/*' -x 'io-virus-cleaner/.git/*'
-   shasum -a 256 io-virus-cleaner-1.2.0.zip     # Linux 用 sha256sum
+   zip -r io-virus-cleaner-1.2.1.zip io-virus-cleaner -x '*.DS_Store' -x 'io-virus-cleaner/docs/*' -x 'io-virus-cleaner/.git/*'
+   shasum -a 256 io-virus-cleaner-1.2.1.zip     # Linux 用 sha256sum
    ```
 3. 把 zip 传到服务器，再更新 `info.json`（`version`、`download`、`sha256`、`changelog`）。**先传 zip，最后传 `info.json`**，避免用户看到更新却下载不到。
 
