@@ -67,7 +67,7 @@ final class IO_Virus_Cleaner {
     public static function menu() {
         add_management_page(
             'IO Virus Cleaner',
-            '木马清理',
+            '病毒清理',
             'manage_options',
             self::SLUG,
             array(__CLASS__, 'render')
