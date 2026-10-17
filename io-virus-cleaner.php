@@ -7,6 +7,8 @@
  * Author URI: https://www.iotheme.cn/
  * Requires at least: 5.8
  * Requires PHP: 7.4
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Update URI: https://github.com/owen0o0/io-virus-cleaner
  */
 
