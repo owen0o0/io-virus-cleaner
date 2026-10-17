@@ -241,7 +241,7 @@ final class IO_Virus_Cleaner {
                 if ($tty) {
                     fwrite(STDERR, "\r\033[K");
                 }
-                echo ($suspect ? '[可疑] ' : '[命中] ') . $row['path'] . '  ' . $row['reason'] . "\n";
+                echo ($suspect ? '[可疑] ' : '[命中] ') . $row['path'] . '  ' . $row['reason'] . self::perms_suffix($row) . "\n";
             }
             $s = self::job_status($state);
             if ($tty && !$done) {
@@ -503,6 +503,7 @@ final class IO_Virus_Cleaner {
             <?php if ($notice !== '') : ?>
                 <div class="notice notice-success is-dismissible"><p><?php echo esc_html($notice); ?></p></div>
             <?php endif; ?>
+            <?php self::render_failed_notice(); ?>
             <?php self::render_basedir_status(); ?>
             <?php self::render_basedir_reminder(); ?>
             <form method="post" id="io-vc-scan-form" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
@@ -883,7 +884,7 @@ final class IO_Virus_Cleaner {
             echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
             wp_nonce_field('io_vc_clean');
             echo '<input type="hidden" name="action" value="io_vc_clean">';
-            echo '<table class="widefat striped"><thead><tr><th style="width:2em"></th><th>文件</th><th>原因</th><th>大小</th></tr></thead><tbody>';
+            echo '<table class="widefat striped"><thead><tr><th style="width:2em"></th><th>文件</th><th>原因</th><th>大小</th><th>权限</th></tr></thead><tbody>';
             foreach ($files as $i => $row) {
                 echo '<tr>';
                 $checked = (strpos((string) $row['reason'], '可疑') === 0) ? '' : ' checked';
@@ -891,9 +892,17 @@ final class IO_Virus_Cleaner {
                 echo '<td><code>' . esc_html($row['path']) . '</code></td>';
                 echo '<td>' . esc_html($row['reason']) . '</td>';
                 echo '<td>' . esc_html(size_format((int) $row['size'])) . '</td>';
+                echo '<td><code>' . esc_html(isset($row['perms']) ? (string) $row['perms'] : '') . '</code>';
+                if (!empty($row['manual'])) {
+                    echo '<br><span style="color:#b32d2e" title="' . esc_attr((string) $row['manual']) . '">可能无法删除，需手动删除</span>';
+                }
+                echo '</td>';
                 echo '</tr>';
             }
             echo '</tbody></table>';
+            if (array_filter(array_column($files, 'manual'))) {
+                echo '<p class="description" style="color:#b32d2e">标了「可能无法删除」的文件，网页进程对它所在的目录没有写权限，点删除或隔离多半会失败。请在服务器上用 root 或文件所有者手动删除，或先改目录权限和属主再回来处理。</p>';
+            }
             echo '<p class="description">原因以「可疑」开头的是通用特征，正常的加密主题或老插件偶尔也会命中，默认不勾选，请先看内容再决定。</p>';
             echo '<p class="description">隔离会把勾选文件移到 <code>wp-content/io-virus-quarantine/</code>，文件名加上 <code>.txt</code>，原位置不再执行。确认没有用处后，再用页面上方的按钮删除隔离文件。</p>';
             echo '<p>';
@@ -1127,9 +1136,18 @@ final class IO_Virus_Cleaner {
         $lines = array();
         foreach ($rows as $row) {
             $suspect = strpos((string) $row['reason'], '可疑') === 0;
-            $lines[] = self::log_line(($suspect ? '[可疑] ' : '[命中] ') . $row['path'] . '  ' . $row['reason'], $suspect ? 'warn' : 'hit');
+            $lines[] = self::log_line(($suspect ? '[可疑] ' : '[命中] ') . $row['path'] . '  ' . $row['reason'] . self::perms_suffix($row), $suspect ? 'warn' : 'hit');
         }
         return $lines;
+    }
+
+    /** 终端和命令行里命中行末尾的权限，例如 '  [0644 www:www]'；没有就返回空串。 */
+    private static function perms_suffix($row) {
+        $text = !empty($row['perms']) ? '  [' . $row['perms'] . ']' : '';
+        if (!empty($row['manual'])) {
+            $text .= '  （可能无法删除，需手动删除：' . $row['manual'] . '）';
+        }
+        return $text;
     }
 
     /**
@@ -1265,8 +1283,9 @@ final class IO_Virus_Cleaner {
         $files  = (is_array($report) && isset($report['files']) && is_array($report['files'])) ? $report['files'] : array();
         $ids    = isset($_POST['ids']) ? (array) wp_unslash($_POST['ids']) : array();
         $mode   = isset($_POST['mode_delete']) ? 'delete' : 'quarantine';
-        $done   = 0;
-        $failed = 0;
+        $done     = 0;
+        $failed   = 0;
+        $failures = array();
 
         foreach ($ids as $id) {
             $id = (int) $id;
@@ -1276,6 +1295,7 @@ final class IO_Virus_Cleaner {
             $path = $files[$id]['path'];
             if (!self::is_threat($path)) {
                 $failed++;
+                $failures[$path] = '已不再判定为木马，没有处理';
                 continue;
             }
             if ($mode === 'delete') {
@@ -1289,15 +1309,19 @@ final class IO_Virus_Cleaner {
                 unset($files[$id]);
             } else {
                 $failed++;
+                $failures[$path] = self::delete_failure_reason($path);
             }
         }
 
         $report['files'] = array_values($files);
         set_transient(self::report_key(), $report, HOUR_IN_SECONDS);
+        if ($failures) {
+            set_transient(self::failed_key(), $failures, 10 * MINUTE_IN_SECONDS);
+        }
         $verb   = $mode === 'delete' ? '删除' : '隔离';
         $notice = sprintf('已%s %d 个文件', $verb, $done);
         if ($failed) {
-            $notice .= sprintf('，%d 个失败', $failed);
+            $notice .= sprintf('，%d 个失败（需要手动删除，见下方说明）', $failed);
         }
         wp_safe_redirect(add_query_arg('io_vc_notice', $notice, admin_url('tools.php?page=' . self::SLUG)));
         exit;
@@ -1312,6 +1336,57 @@ final class IO_Virus_Cleaner {
 
     private static function report_key() {
         return 'io_vc_report_' . get_current_user_id();
+    }
+
+    private static function failed_key() {
+        return 'io_vc_failed_' . get_current_user_id();
+    }
+
+    /**
+     * 网页进程大概率删不掉这个文件的原因；能删返回 ''。
+     * 删文件要的是所在目录的写权限，文件自己的权限不起作用。
+     * 看不出来的情况（比如 chattr +i、被占用）扫描时发现不了，只能删失败后再提示。
+     */
+    private static function delete_blocker($path) {
+        $dir = dirname($path);
+        if (!@is_writable($dir)) {
+            return '网页进程对所在目录没有写权限';
+        }
+        // 带粘滞位的目录（如 /tmp）：只有文件属主、目录属主或 root 能删，光有写权限不够
+        $mode = @fileperms($dir);
+        if ($mode !== false && ($mode & 01000) && function_exists('posix_geteuid')) {
+            $me = posix_geteuid();
+            if ($me !== 0 && @fileowner($path) !== $me && @fileowner($dir) !== $me) {
+                return '所在目录有粘滞位，文件不属于网页进程的用户';
+            }
+        }
+        return '';
+    }
+
+    private static function delete_failure_reason($path) {
+        if (!file_exists($path)) {
+            return '文件已经不存在';
+        }
+        $reason = self::delete_blocker($path);
+        return $reason !== '' ? $reason : '权限不足或正被其他进程占用';
+    }
+
+    /**
+     * 删除或隔离失败的文件：列出路径和原因，提示到服务器上手动删除。
+     * 只显示一次（读完就清掉），不会反复提醒。
+     */
+    private static function render_failed_notice() {
+        $failures = get_transient(self::failed_key());
+        if (!is_array($failures) || !$failures) {
+            return;
+        }
+        delete_transient(self::failed_key());
+        echo '<div class="notice notice-warning"><p><strong>下面这些文件没能删除，请到服务器上或用 SSH 手动删除：</strong></p>';
+        echo '<ul style="list-style:disc;margin-left:2em">';
+        foreach ($failures as $path => $reason) {
+            echo '<li><code>' . esc_html((string) $path) . '</code>　' . esc_html((string) $reason) . '</li>';
+        }
+        echo '</ul></div>';
     }
 
     // === 木马特征和判定 ===
@@ -1391,6 +1466,10 @@ final class IO_Virus_Cleaner {
         $parent = basename(dirname($path));
         if ($parent === '.data' && (self::under_upload($path) || self::under_temp($path))) {
             return '远控记录 .data';
+        }
+        // 上传目录里不会有正常的 PHP；文件名是公开流传的 WebShell 名字，直接算高可信
+        if (preg_match('/^(?:c99|c100|r57|wso\d*|b374k|indoxploit|p0wny(?:shell)?|alfa-?shell|webshell|filesman)\.(?:php\d?|phtml|pht|phar)$/i', $base) && self::under_upload($path)) {
+            return '上传目录里的常见 WebShell 文件名';
         }
         if (!self::under_temp($path)) {
             return '';
@@ -1628,6 +1707,18 @@ final class IO_Virus_Cleaner {
             'include 请求参数指定的文件'   => '/\b(?:include|require)(?:_once)?\s*\(?\s*@?' . $sg . '\s*\[/i',
             '按请求参数写文件'             => '/file_put_contents\s*\(\s*@?' . $sg . '\s*\[/i',
             '函数名用 base64 藏起来'       => '/[\'"](?:ZXZhbA==|YXNzZXJ0|c3lzdGVt|ZXhlYw==|c2hlbGxfZXhlYw==|cGFzc3RocnU=|cG9wZW4=|cHJvY19vcGVu)[\'"]/',
+            // 后门不走 GET/POST，改从请求头里取代码：eval($_SERVER['HTTP_X_CMD'])
+            '请求头内容直接执行'           => '/\b(?:eval|assert|system|exec|shell_exec|passthru|popen)\s*\(\s*@?\s*' . $wrap . '@?\$_SERVER\s*\[\s*[\'"]HTTP_/i',
+            // array_map('assert', $_POST) 这类：危险函数名写死，参数是请求内容，两种先后顺序都认
+            '危险函数当回调处理请求参数'   => '/\b(?:array_map|array_filter|array_walk|array_reduce|usort|uasort|uksort|call_user_func(?:_array)?)\s*\((?:[^;]{0,200}[\'"](?:assert|system|exec|shell_exec|passthru|popen|proc_open)[\'"][^;]{0,200}' . $sg . '\b|[^;]{0,200}' . $sg . '\b[^;]{0,200}[\'"](?:assert|system|exec|shell_exec|passthru|popen|proc_open)[\'"])/i',
+            // $f = $_POST['f']; $f($_POST['x']);
+            '请求参数存进变量再当函数调用' => '/\$(\w+)\s*=\s*@?' . $sg . '\s*\[[^\]]{1,40}\]\s*;[\s\S]{0,200}?\$\1\s*\(\s*@?' . $sg . '\b/i',
+            // 用请求里的用户 ID 直接签发登录 Cookie，等于免密码登录任意账号
+            '请求参数直接决定登录用户'     => '/\bwp_(?:set_auth_cookie|set_current_user)\s*\(\s*(?:\(\s*int\s*\)\s*|intval\s*\(\s*)?@?' . $sg . '\b/i',
+            // 下面三条是反弹 shell，不需要请求参数，扫描时按关键字单独放行
+            '反弹 shell（/dev/tcp）'       => '/\/dev\/tcp\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d+|bash\s+-i\s*>&?\s*\/dev\/tcp\//i',
+            '反弹 shell（nc 或 mkfifo）'   => '/\bnc(?:at)?\s+(?:-\w+\s+)*-e\s+\/bin\/(?:ba)?sh|\bmkfifo\s+\/tmp\/\w+[\s\S]{0,80}\/bin\/(?:ba)?sh\s+-i/i',
+            '反弹 shell（fsockopen 配合 /bin/sh）' => '/\bfsockopen\s*\([^;]{0,200}\)\s*;[\s\S]{0,600}?\b(?:proc_open|popen|exec|shell_exec|system|passthru)\s*\([^;]{0,120}\/bin\/(?:ba)?sh/i',
         );
     }
 
@@ -1640,6 +1731,8 @@ final class IO_Virus_Cleaner {
             '可疑：用 chr 拼出函数名'      => '/(?:chr\s*\(\s*\d+\s*\)\s*\.\s*){6,}/i',
             '可疑：遍历目录批量改文件时间' => '/function\s+\w+\s*\([^)]*\)\s*\{[^}]{0,300}scandir[\s\S]{0,400}@?touch\s*\(/i',
             '可疑：用客户端文件名保存上传' => '/move_uploaded_file\s*\([^;]*\$_FILES\s*\[[^\]]+\]\s*\[\s*[\'"]name[\'"]\s*\]/i',
+            // 后门常在这里悄悄加一个管理员；正常的安装向导、会员插件也可能这样写，所以只算可疑
+            '可疑：代码里直接创建管理员' => '/\b(?:wp_create_user|wp_insert_user|wp_update_user)\s*\([^;]{0,300}[\'"]administrator[\'"]/i',
         );
     }
 
@@ -1704,7 +1797,7 @@ final class IO_Virus_Cleaner {
     }
 
     private static function known_shell_pattern() {
-        return '/\b(?:FilesMan|c99shell|c99_sess|r57shell|b374k|wso_version|IndoXploit|Weevely|China\s*Chopper|PHPSpy)\b/i';
+        return '/\b(?:FilesMan|c99shell|c99_sess|r57shell|b374k|wso_version|IndoXploit|Weevely|China\s*Chopper|PHPSpy|p0wny|Ani-Shell|Safe0ver|ALFA\s*TEaM)\b/i';
     }
 
     private static function generic_matches($path) {
@@ -1731,7 +1824,14 @@ final class IO_Virus_Cleaner {
 
         // 先用便宜的字符串查找挡掉绝大多数正常文件，再跑正则
         $has_req = strpos($data, '$_') !== false;
-        $no_req  = array('eval 执行 php://input' => 'php://input', '函数名用 base64 藏起来' => '');        foreach (self::high_patterns() as $label => $re) {
+        $no_req  = array(
+            'eval 执行 php://input'                => 'php://input',
+            '函数名用 base64 藏起来'               => '',
+            '反弹 shell（/dev/tcp）'               => '/dev/tcp/',
+            '反弹 shell（nc 或 mkfifo）'           => '/bin/',
+            '反弹 shell（fsockopen 配合 /bin/sh）' => 'fsockopen',
+        );
+        foreach (self::high_patterns() as $label => $re) {
             if (!$has_req) {
                 if (!isset($no_req[$label])) {
                     continue;
@@ -1767,6 +1867,7 @@ final class IO_Virus_Cleaner {
             '可疑：用 chr 拼出函数名'      => 'chr',
             '可疑：用客户端文件名保存上传' => 'move_uploaded_file',
             '可疑：遍历目录批量改文件时间' => 'touch',
+            '可疑：代码里直接创建管理员'   => 'administrator',
         );
         $suspect = '';
         foreach (self::suspect_patterns() as $label => $re) {
@@ -2564,8 +2665,42 @@ final class IO_Virus_Cleaner {
             'path'   => $real,
             'reason' => $reason,
             'size'   => (int) filesize($real),
+            'perms'  => self::file_perms($real),
+            'manual' => self::delete_blocker($real),
         );
         self::expand_around($real, $found, $seen);
+    }
+
+    /**
+     * 文件权限和属主，例如 '0644 www:www'。读不到的部分省略，全读不到返回 ''。
+     * 属主要 posix 扩展，没有就只显示权限。
+     */
+    private static function file_perms($path) {
+        $mode = @fileperms($path);
+        if ($mode === false) {
+            return '';
+        }
+        $text = sprintf('%04o', $mode & 07777);
+        $uid  = @fileowner($path);
+        $gid  = @filegroup($path);
+        if ($uid !== false && $gid !== false) {
+            $user  = (string) $uid;
+            $group = (string) $gid;
+            if (function_exists('posix_getpwuid')) {
+                $info = @posix_getpwuid($uid);
+                if (is_array($info) && isset($info['name'])) {
+                    $user = $info['name'];
+                }
+            }
+            if (function_exists('posix_getgrgid')) {
+                $info = @posix_getgrgid($gid);
+                if (is_array($info) && isset($info['name'])) {
+                    $group = $info['name'];
+                }
+            }
+            $text .= ' ' . $user . ':' . $group;
+        }
+        return $text;
     }
 
     private static function expand_around($path, &$found, &$seen) {
@@ -2674,19 +2809,24 @@ final class IO_Virus_Cleaner {
 
     public static function handle_purge_quarantine() {
         self::guard('io_vc_purge_quarantine');
-        $deleted = 0;
-        $failed  = 0;
+        $deleted  = 0;
+        $failed   = 0;
+        $failures = array();
         foreach (self::quarantine_files() as $path) {
             if (@unlink($path)) {
                 $deleted++;
             } else {
                 $failed++;
+                $failures[$path] = self::delete_failure_reason($path);
             }
         }
         self::remove_empty_quarantine_dirs();
+        if ($failures) {
+            set_transient(self::failed_key(), $failures, 10 * MINUTE_IN_SECONDS);
+        }
         $notice = sprintf('已删除 %d 个隔离文件', $deleted);
         if ($failed) {
-            $notice .= sprintf('，%d 个失败', $failed);
+            $notice .= sprintf('，%d 个失败（需要手动删除，见下方说明）', $failed);
         }
         wp_safe_redirect(add_query_arg('io_vc_notice', $notice, admin_url('tools.php?page=' . self::SLUG)));
         exit;
@@ -2808,7 +2948,12 @@ final class IO_Virus_Cleaner {
         if (!@copy($path, $dest)) {
             return false;
         }
-        return @unlink($path);
+        if (@unlink($path)) {
+            return true;
+        }
+        // 原文件删不掉：把刚复制的副本也删了，不要在隔离区里留下一份、原处还有一份
+        @unlink($dest);
+        return false;
     }
 }
 

