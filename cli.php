@@ -11,6 +11,10 @@
  *       --exclude 的写法：绝对路径或相对本站根目录的路径（带 /）排除整个目录；
  *       只写目录名（不带 /）排除任何位置同名的目录。多个用逗号隔开。
  *
+ *   php cli.php --dir=/www/wwwroot --core-check
+ *       --core-check：同时校验 WordPress 核心文件（和官方 MD5 比对，找被改过的、多出来的 PHP 文件）。
+ *       要连接 api.wordpress.org，默认不开。每个站点按它自己的版本和语言包校验。
+ *
  * 只列出结果，不删除、不隔离。确认后到站点后台「工具 → 病毒清理」或手动处理。
  * 有「高可信」命中时退出码为 1，只有「可疑」或没有命中时为 0。
  */
@@ -33,17 +37,21 @@ function get_option($name, $default = false) { return $default; }
 
 require __DIR__ . '/io-virus-cleaner.php';
 
-$dirs    = array();
-$exclude = array();
+$dirs       = array();
+$exclude    = array();
+$core_check = false;
 foreach (array_slice($argv, 1) as $arg) {
     if (strpos($arg, '--dir=') === 0) {
         $dirs = array_merge($dirs, explode(',', substr($arg, 6)));
     } elseif (strpos($arg, '--exclude=') === 0) {
         $exclude = array_merge($exclude, explode(',', substr($arg, 10)));
+    } elseif ($arg === '--core-check') {
+        $core_check = true;
     } elseif ($arg === '-h' || $arg === '--help') {
-        echo "用法：php cli.php [--dir=/www/wwwroot[,/其他目录]] [--exclude=/绝对路径,相对路径,目录名]\n";
+        echo "用法：php cli.php [--dir=/www/wwwroot[,/其他目录]] [--exclude=/绝对路径,相对路径,目录名] [--core-check]\n";
+        echo "  --core-check  同时校验 WordPress 核心文件（要连接 api.wordpress.org，默认不校验）\n";
         exit(0);
     }
 }
 
-exit(IO_Virus_Cleaner::cli_standalone($dirs, $exclude));
+exit(IO_Virus_Cleaner::cli_standalone($dirs, $exclude, $core_check));
