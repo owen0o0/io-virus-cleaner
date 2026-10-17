@@ -246,41 +246,29 @@
 
 ## 自动更新
 
-插件头里写了 `Update URI: https://www.iotheme.cn/io-plugin/io-virus-cleaner/`，WordPress 不会再去 wordpress.org 找它，改为到这个目录取更新。后台「插件」页出现「有新版本」，点更新就行。
+插件头里写了 `Update URI: https://github.com/owen0o0/io-virus-cleaner`，WordPress 不会再去 wordpress.org 找它，改为到 GitHub Releases 取更新。后台「插件」页出现「有新版本」，点更新就行；「查看版本详情」里显示的更新说明就是 Release 的正文。
 
-服务器上放这两个静态文件就够了，不需要 PHP：
+发新版（推一个 tag，其余自动完成）：
 
-```
-https://www.iotheme.cn/io-plugin/io-virus-cleaner/info.json
-https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.1.zip
-```
-
-`info.json`（`version`、`download`、`sha256` 必填）：
-
-```json
-{
-  "version": "1.2.1",
-  "download": "https://www.iotheme.cn/io-plugin/io-virus-cleaner/io-virus-cleaner-1.2.1.zip",
-  "sha256": "zip 文件的 sha256，64 位小写十六进制",
-  "homepage": "https://www.iotheme.cn/",
-  "requires": "5.8",
-  "requires_php": "7.4",
-  "changelog": "新增 xxx\n修复 xxx"
-}
-```
-
-发新版：
-
-1. 改插件头的 `Version` 和 `const VERSION`，两处要一致。
-2. 在 `wp-content/plugins` 目录打包。zip 里的顶层目录必须叫 `io-virus-cleaner`：
+1. 改插件头的 `Version` 和 `const VERSION`，两处要一致，提交并推送。
+2. 打 tag 并推送，tag 就是版本号，前面加不加 `v` 都行（`v1.2.2` 或 `1.2.2`）。用带说明的 tag，说明会成为 Release 的更新说明：
    ```
-   zip -r io-virus-cleaner-1.2.1.zip io-virus-cleaner -x '*.DS_Store' -x 'io-virus-cleaner/docs/*' -x 'io-virus-cleaner/.git/*'
-   shasum -a 256 io-virus-cleaner-1.2.1.zip     # Linux 用 sha256sum
+   git tag -a v1.2.2 -m "新增 xxx；修复 xxx" && git push origin v1.2.2
    ```
-3. 把 zip 传到服务器，再更新 `info.json`（`version`、`download`、`sha256`、`changelog`）。**先传 zip，最后传 `info.json`**，避免用户看到更新却下载不到。
+3. GitHub Actions（`.github/workflows/release.yml`）会自动：
+   - 核对 tag、插件头 `Version`、`const VERSION` 三者一致，不一致就失败，不发布；
+   - 对所有 PHP 文件做语法检查；
+   - 用 `git archive` 打包：只含仓库里的文件，顶层目录是 `io-virus-cleaner`，文件名 `io-virus-cleaner-<版本>.zip`，不含 `.github`、`.gitignore`、`docs/`；
+   - 创建 Release，上传 zip 和 `.zip.sha256`，正文用 tag 的说明（没写说明就按提交自动生成）。
+4. 到仓库的 Actions 页确认这次运行成功，再到 Releases 页看一眼附件。
+
+不想用 Actions 时，也可以手动：在 `wp-content/plugins` 目录 `zip -r io-virus-cleaner-1.2.2.zip io-virus-cleaner -x '*.DS_Store' -x 'io-virus-cleaner/docs/*' -x 'io-virus-cleaner/.git/*' -x 'io-virus-cleaner/.github/*'`，再 `gh release create v1.2.2 io-virus-cleaner-1.2.2.zip --title 1.2.2 --notes "…"`。
+不要用 GitHub 自动生成的「Source code」压缩包：它的顶层目录叫 `io-virus-cleaner-1.2.2`，装上去会变成另一个插件。
 
 安全限制：
-- `info.json` 里的 `download` 必须是 `https://www.iotheme.cn/io-plugin/io-virus-cleaner/` 下的 `.zip`，并且必须有 `sha256`，缺一个就当作没有更新。
+- 只认最新的正式 Release（草稿和预发布不算）。附件必须叫 `io-virus-cleaner-<版本号>.zip`，下载地址必须正好是 `https://github.com/owen0o0/io-virus-cleaner/releases/download/<tag>/<文件名>`，不是就当作没有更新。
+- 必须有 `sha256`：优先用 GitHub 给附件算出来的 `digest`；没有的话读同一个 Release 里的 `io-virus-cleaner-<版本号>.zip.sha256` 附件（内容是 64 位十六进制，可以带文件名）。两者都没有，就当作没有更新。
 - 安装前插件会自己下载 zip 并校验 `sha256`，对不上就取消，不会装。
-- 检查更新的结果缓存 1 小时；失败时 10 分钟后再试。
-- 站点要先手动装一次带 `Update URI` 的版本（就是现在这个版本），之后才能自动更新。
+- 检查更新的结果缓存 1 小时；失败时 10 分钟后再试。GitHub 未登录的接口每个 IP 每小时限 60 次，撞上限额（403、429）会等一小时再试。
+- **国内服务器访问 GitHub 可能很慢或连不上**，检查更新超时就看不到提示，下载超时会更新失败；这时手动下载 Release 里的 zip 上传安装即可。
+- 站点要先手动装一次这个带 `Update URI` 的版本，之后才能自动更新。从旧的 `www.iotheme.cn` 更新源装的版本，也要手动装一次。

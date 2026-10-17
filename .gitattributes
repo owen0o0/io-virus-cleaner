@@ -1,0 +1,4 @@
+# git archive（发版打包）时不放进 zip 的文件
+.github export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore

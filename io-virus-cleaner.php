@@ -2,12 +2,12 @@
 /**
  * Plugin Name: IO Virus Cleaner
  * Description: WordPress 病毒和木马扫描清理：按文件名、内容特征和通用 webshell 写法识别，可以扫描整个 wwwroot，支持命令行。
- * Version: 1.2.1
+ * Version: 1.2.2
  * Author: 一为
  * Author URI: https://www.iotheme.cn/
  * Requires at least: 5.8
  * Requires PHP: 7.4
- * Update URI: https://www.iotheme.cn/io-plugin/io-virus-cleaner/
+ * Update URI: https://github.com/owen0o0/io-virus-cleaner
  */
 
 if (!defined('ABSPATH')) {
@@ -22,7 +22,7 @@ if (!defined('IO_VC_FILE')) {
 
 // 代码按功能拆在 includes/ 下，每个文件是一个 trait，下面统一并进 IO_Virus_Cleaner。
 // 加新功能：在 includes/ 里新建一个 trait 文件，在这里 require，再在类里 use。
-require_once IO_VC_DIR . '/includes/trait-updater.php';      // 自动更新（自建更新源）
+require_once IO_VC_DIR . '/includes/trait-updater.php';      // 自动更新（GitHub Releases）
 require_once IO_VC_DIR . '/includes/trait-cli.php';          // 命令行扫描、WP-CLI
 require_once IO_VC_DIR . '/includes/trait-basedir.php';      // open_basedir 的判断和提示
 require_once IO_VC_DIR . '/includes/trait-page.php';         // 扫描页和结果报告
@@ -49,10 +49,11 @@ final class IO_Virus_Cleaner {
     use IO_VC_Cron;
     use IO_VC_Quarantine;
 
-    const VERSION = '1.2.1';
+    const VERSION = '1.2.2';
     const SLUG    = 'io-virus-cleaner';
-    const UPDATE_URI  = 'https://www.iotheme.cn/io-plugin/io-virus-cleaner/';
-    const UPDATE_INFO = 'https://www.iotheme.cn/io-plugin/io-virus-cleaner/info.json';
+    const UPDATE_URI  = 'https://github.com/owen0o0/io-virus-cleaner';
+    const UPDATE_API  = 'https://api.github.com/repos/owen0o0/io-virus-cleaner/releases/latest';
+    const DOWNLOAD_PREFIX = 'https://github.com/owen0o0/io-virus-cleaner/releases/download/';
 
     // === 运行期缓存和临时覆盖 ===
     // 改了扫描范围或排除规则以后，用 set_extra_dirs() / set_exclude_dirs() 一起清掉。

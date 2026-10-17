@@ -1,0 +1,65 @@
+name: Release
+
+# 推一个版本 tag（v1.2.3 或 1.2.3）就自动：核对版本号、检查语法、打包 zip、创建 Release。
+# 插件的自动更新就是读这个 Release 里的 io-virus-cleaner-<版本>.zip，所以文件名和目录名不能改。
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 核对 tag 和插件版本号一致
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          header=$(sed -n 's/^ \* Version:[[:space:]]*//p' io-virus-cleaner.php | head -n1 | tr -d '[:space:]')
+          const=$(sed -n "s/.*const VERSION = '\([^']*\)'.*/\1/p" io-virus-cleaner.php | head -n1)
+          echo "tag=$version 插件头=$header const=$const"
+          if [ "$version" != "$header" ] || [ "$version" != "$const" ]; then
+            echo "::error::tag（$version）和插件里的版本号（插件头 $header，VERSION $const）不一致，先改版本号再打 tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: 检查 PHP 语法
+        run: |
+          php -v | head -n1
+          for f in io-virus-cleaner.php cli.php includes/*.php; do php -l "$f"; done
+
+      - name: 打包
+        run: |
+          # git archive 只打进仓库里的文件；.github、.gitignore 等在 .gitattributes 里标了 export-ignore
+          zip_name="io-virus-cleaner-${{ steps.ver.outputs.version }}.zip"
+          git archive --format=zip --prefix=io-virus-cleaner/ -o "$zip_name" "${GITHUB_SHA}"
+          sha256sum "$zip_name" | awk '{print $1}' > "$zip_name.sha256"
+          echo "--- 包里的内容 ---"
+          unzip -l "$zip_name"
+          # 顶层目录只能有 io-virus-cleaner，否则装上去会变成另一个插件
+          if unzip -Z1 "$zip_name" | grep -v '^io-virus-cleaner/' | grep -q .; then
+            echo "::error::zip 里有不在 io-virus-cleaner/ 下的文件"
+            exit 1
+          fi
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip_name="io-virus-cleaner-${{ steps.ver.outputs.version }}.zip"
+          # 更新说明：优先用带注释的 tag 的说明（git tag -a -m），没有就让 GitHub 按提交生成
+          git fetch --tags --force
+          notes="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")"
+          if [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+            gh release create "${GITHUB_REF_NAME}" "$zip_name" "$zip_name.sha256" --title "${{ steps.ver.outputs.version }}" --notes "$notes"
+          else
+            gh release create "${GITHUB_REF_NAME}" "$zip_name" "$zip_name.sha256" --title "${{ steps.ver.outputs.version }}" --generate-notes
+          fi
