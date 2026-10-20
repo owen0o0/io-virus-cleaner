@@ -60,6 +60,8 @@ trait IO_VC_Signatures {
             'IO Cache Helper -',
             'IO Perf Monitor -',
             'NAVC_BEACON',
+            'share.bceboss.com',
+            'api-alibabacloud.com',
             '2a5ca507a02d8096a368fe13e7e488f55cdf2ba0bde15a7256a3f8273f568f3e',
         );
     }
@@ -438,6 +440,32 @@ trait IO_VC_Signatures {
     }
 
     /**
+     * 加密外壳：自己写一个解码函数（base64、gzip 解压，再逐字节 chr(ord(..)-1) 移位），解出来的变量直接 eval。
+     * 常见于被注入到 index.php 开头的 SEO 劫持代码。要同时有解压或解码调用、字符移位和 eval($变量) 三样。
+     */
+    private static function custom_decoder_eval($data) {
+        if (stripos($data, 'eval') === false || stripos($data, 'chr') === false || stripos($data, 'ord') === false) {
+            return false;
+        }
+        return preg_match('/\beval\s*\(\s*@?\s*\$\w+\s*\)/i', $data)
+            && preg_match('/(?:gzinflate|gzuncompress|gzdecode|base64_decode|str_rot13)\s*\([\s\S]{0,300}?\bchr\s*\(\s*ord\s*\([^;]{0,60}\)\s*[-+]\s*\d+\s*\)/i', $data);
+    }
+
+    /**
+     * WordPress 自带的入口文件（index.php、wp-blog-header.php 等）里本来没有 eval。
+     * 被注入的代码常放在文件开头，所以这几个文件里出现 eval( 就算高可信。
+     */
+    private static function core_entry_eval($name, $data) {
+        if (!in_array($name, array('index.php', 'wp-blog-header.php', 'wp-load.php', 'wp-settings.php', 'wp-cron.php'), true)) {
+            return false;
+        }
+        if ($name === 'index.php' && strpos($data, 'WP_USE_THEMES') === false) {
+            return false;
+        }
+        return stripos($data, 'eval') !== false && preg_match('/\beval\s*\(\s*@?\s*[$\w]/i', $data);
+    }
+
+    /**
      * 黑帽 SEO（cloaking）：判断访问者是不是搜索引擎爬虫，是就去外部地址取内容原样输出，站长自己访问看不出来。
      * 要同时满足：读 User-Agent、列了 3 种以上搜索引擎爬虫名、发 HTTP 请求（curl、wp_remote、stream_context）、输出并结束。
      */
@@ -521,6 +549,12 @@ trait IO_VC_Signatures {
         }
         if (self::hex_decode_eval($data)) {
             return '自己写的十六进制解码后 eval 执行';
+        }
+        if (self::custom_decoder_eval($data)) {
+            return '自定义解码函数加 eval 执行（加密外壳）';
+        }
+        if (self::core_entry_eval($name, $data)) {
+            return 'WordPress 入口文件里被塞进 eval 代码';
         }
         if (self::seo_cloak($data)) {
             return '黑帽 SEO：按搜索引擎爬虫返回远程内容';

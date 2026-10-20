@@ -487,7 +487,11 @@ trait IO_VC_Page {
             if (!empty($row['error'])) {
                 echo '<td style="color:#b32d2e">' . esc_html((string) $row['error']) . '</td>';
             } elseif ($bad) {
-                echo '<td style="color:#b32d2e">' . (!empty($row['limited']) ? '只列出前 ' . (int) self::core_row_limit() . ' 条；改动很多多半是版本或语言包对不上，先确认站点实际版本' : '见下表') . '</td>';
+                echo '<td style="color:#b32d2e">' . (!empty($row['limited']) ? '只列出前 ' . (int) self::core_row_limit() . ' 条；改动很多多半是版本或语言包对不上，先确认站点实际版本' : '见下表');
+                if (!empty($row['modified']) && !empty($row['download'])) {
+                    echo '<br><a href="' . esc_url((string) $row['download']) . '" target="_blank" rel="noopener noreferrer">下载官方 ' . esc_html((string) $row['version']) . ' 安装包</a>';
+                }
+                echo '</td>';
             } else {
                 echo '<td style="color:#008000">与官方一致</td>';
             }
@@ -510,7 +514,7 @@ trait IO_VC_Page {
             echo '</tr>';
         }
         echo '</tbody></table>';
-        echo '<p class="description">核心文件不提供删除和隔离，误删会让站点打不开。被修改的核心文件：先确认是不是自己改的，不是的话到「仪表盘 → 更新」重新安装当前版本，或在服务器上执行 <code>wp core download --force --skip-content</code>。'
+        echo '<p class="description">核心文件不提供删除和隔离，误删会让站点打不开。被修改的核心文件：先确认是不是自己改的，不是的话，从上面汇总表里的「下载官方安装包」链接下载 zip，解压后<strong>只复制被修改的那几个文件</strong>到站点对应位置覆盖；不要整个目录覆盖，也不要动 <code>wp-config.php</code> 和 <code>wp-content</code>。也可以到「仪表盘 → 更新」重新安装当前版本，或在服务器上执行 <code>wp core download --force --skip-content</code>。'
             . '多出的 PHP 文件：官方安装包里没有，多半是木马，打开看过内容后到服务器上手动删除。</p>';
     }
 }

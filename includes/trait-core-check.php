@@ -137,6 +137,20 @@ trait IO_VC_CoreCheck {
     }
 
     /**
+     * 官方安装包的下载地址，用来手动替换被修改的文件。只认正式版本号，预发布版本没有固定地址，返回空。
+     * 英文版在 wordpress.org，其他语言包在 downloads.wordpress.org/release/<语言>/。
+     */
+    private static function core_download_url($version, $locale) {
+        if (!preg_match('/^\d+\.\d+(?:\.\d+)?$/', (string) $version)) {
+            return '';
+        }
+        if ($locale === '' || $locale === 'en_US' || !preg_match('/^[a-z]{2,3}(?:_[A-Za-z]{2,4})*$/', (string) $locale)) {
+            return 'https://wordpress.org/wordpress-' . $version . '.zip';
+        }
+        return 'https://downloads.wordpress.org/release/' . $locale . '/wordpress-' . $version . '.zip';
+    }
+
+    /**
      * 解析并检查接口返回：只收「相对路径 => 32 位十六进制 MD5」，路径里不能有 .. 或绝对路径。
      */
     private static function core_parse_checksums($body) {
@@ -214,7 +228,7 @@ trait IO_VC_CoreCheck {
      */
     private static function core_check_root($root, &$state) {
         $info = array('root' => $root, 'version' => '', 'locale' => '', 'checked' => 0, 'missing' => 0,
-            'modified' => 0, 'extra' => 0, 'error' => '', 'limited' => false);
+            'modified' => 0, 'extra' => 0, 'error' => '', 'limited' => false, 'download' => '');
 
         $ver = self::core_version($root);
         if (!$ver) {
@@ -229,7 +243,8 @@ trait IO_VC_CoreCheck {
             $info['error'] = '无法取得官方校验值：' . $sum['error'];
             return self::core_finish($info, $state);
         }
-        $info['locale'] = $sum['locale'];
+        $info['locale']   = $sum['locale'];
+        $info['download'] = self::core_download_url($ver['version'], $sum['locale']);
 
         $limit = self::core_row_limit();
         $known = array();
@@ -334,6 +349,9 @@ trait IO_VC_CoreCheck {
         );
         if (!empty($row['limited'])) {
             $text .= '（只列出前 ' . self::core_row_limit() . ' 条；改动很多多半是版本或语言包对不上，先确认站点实际版本）';
+        }
+        if (!empty($row['modified']) && !empty($row['download'])) {
+            $text .= '  官方安装包：' . $row['download'];
         }
         return $text;
     }
