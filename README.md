@@ -52,7 +52,7 @@ php /path/to/wp-content/plugins/io-virus-cleaner/cli.php --dir=/www/wwwroot
 ## 局限
 
 - 通用规则只能抓写法直白的木马，多层混淆的变种可能漏掉。
-- 不扫描 `vendor`、`node_modules`、`.git`、`cache` 目录。
+- 不扫描 `vendor`、`node_modules`、`.git` 目录；`cache` 目录只检查 PHP 文件。
 - 不检查数据库里的注入内容，也不能代替更换数据库密码、WordPress 密钥盐和用户密码。
 - 看不到正在发生的网络连接。
 

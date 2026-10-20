@@ -28,6 +28,12 @@ trait IO_VC_Signatures {
             'wlb_xff_probe.php',
             'wlb_users.txt',
             'wlb_wpc_orig.bak',
+            'nav-cache-helper.php',
+            'io-compat.php',
+            'wx_seo.php',
+            'wx_probe.php',
+            'wx_navc_test.txt',
+            'rn_test_b.txt',
         );
     }
 
@@ -53,6 +59,8 @@ trait IO_VC_Signatures {
             '/tmp/pwn_done',
             'IO Cache Helper -',
             'IO Perf Monitor -',
+            'NAVC_BEACON',
+            '2a5ca507a02d8096a368fe13e7e488f55cdf2ba0bde15a7256a3f8273f568f3e',
         );
     }
 
@@ -312,7 +320,8 @@ trait IO_VC_Signatures {
             return $list;
         }
         $sg   = '\$_(?:GET|POST|REQUEST|COOKIE)';
-        $wrap = '(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|rawurldecode|urldecode|stripslashes|trim)\s*\(\s*)*';
+        // 解码函数可以套好几层，也可以带类型转换：eval(base64_decode((string)$_POST['x']))
+        $wrap = '(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|rawurldecode|urldecode|stripslashes|trim|strval)\s*\(\s*|\(\s*(?:string|binary)\s*\)\s*)*';
         return $list = array(
             'eval/assert 直接执行请求参数' => '/\b(?:eval|assert)\s*\(\s*@?\s*' . $wrap . '@?' . $sg . '\b/i',
             // 先把请求参数放进变量，稍后再 eval：$b=substr($_POST['s'],1); eval(base64_decode($b));
@@ -337,6 +346,8 @@ trait IO_VC_Signatures {
             // 下面三条是反弹 shell，不需要请求参数，扫描时按关键字单独放行
             '反弹 shell（/dev/tcp）'       => '/\/dev\/tcp\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d+|bash\s+-i\s*>&?\s*\/dev\/tcp\//i',
             '反弹 shell（nc 或 mkfifo）'   => '/\bnc(?:at)?\s+(?:-\w+\s+)*-e\s+\/bin\/(?:ba)?sh|\bmkfifo\s+\/tmp\/\w+[\s\S]{0,80}\/bin\/(?:ba)?sh\s+-i/i',
+            // 远控信标：向外部地址发请求，拿回任务后 eval；不需要请求参数
+            '从远程地址取内容后 eval 执行' => '/\b(?:file_get_contents|curl_init)\s*\(\s*@?\s*[\'"]https?:\/\/[^;]{0,200};[\s\S]{0,1500}?\beval\s*\(\s*@?\s*\$\w+\s*\)/i',
             '反弹 shell（fsockopen 配合 /bin/sh）' => '/\bfsockopen\s*\([^;]{0,200}\)\s*;[\s\S]{0,600}?\b(?:proc_open|popen|exec|shell_exec|system|passthru)\s*\([^;]{0,120}\/bin\/(?:ba)?sh/i',
         );
     }
@@ -415,6 +426,44 @@ trait IO_VC_Signatures {
         return false;
     }
 
+    /**
+     * 自己写循环把十六进制字符串还原成代码再 eval：chr(hexdec(..)) 加 eval。
+     * 不依赖 hex2bin，所以和「十六进制字符串还原代码」那条互补。正常代码里 chr(hexdec()) 本来就少，再同时有 eval 几乎只有木马。
+     */
+    private static function hex_decode_eval($data) {
+        if (stripos($data, 'hexdec') === false || stripos($data, 'eval') === false) {
+            return false;
+        }
+        return preg_match('/\bchr\s*\(\s*hexdec\s*\(/i', $data) && preg_match('/\beval\s*\(\s*@?\s*[$\w]/i', $data);
+    }
+
+    /**
+     * 黑帽 SEO（cloaking）：判断访问者是不是搜索引擎爬虫，是就去外部地址取内容原样输出，站长自己访问看不出来。
+     * 要同时满足：读 User-Agent、列了 3 种以上搜索引擎爬虫名、发 HTTP 请求（curl、wp_remote、stream_context）、输出并结束。
+     */
+    private static function seo_cloak($data) {
+        if (strpos($data, 'HTTP_USER_AGENT') === false) {
+            return false;
+        }
+        if (stripos($data, 'spider') === false && stripos($data, 'sogou') === false && stripos($data, 'bot') === false) {
+            return false;
+        }
+        if (!preg_match('/\bcurl_exec\b|\bwp_remote_(?:get|request)\b|\bstream_context_create\b/i', $data)) {
+            return false;
+        }
+        if (!preg_match('/\becho\b/i', $data) || !preg_match('/\b(?:exit|die)\b/i', $data)) {
+            return false;
+        }
+        if (!preg_match_all('/Baiduspider|360spider|Sogou|Yisouspider|Bytespider|ToutiaoSpider|Sosospider|YoudaoBot|Googlebot|bingbot/i', $data, $m)) {
+            return false;
+        }
+        $names = array();
+        foreach ($m[0] as $n) {
+            $names[strtolower($n)] = true;
+        }
+        return count($names) >= 3;
+    }
+
     private static function known_shell_pattern() {
         return '/\b(?:FilesMan|c99shell|c99_sess|r57shell|b374k|wso_version|IndoXploit|Weevely|China\s*Chopper|PHPSpy|p0wny|Ani-Shell|Safe0ver|ALFA\s*TEaM)\b/i';
     }
@@ -449,6 +498,7 @@ trait IO_VC_Signatures {
             '反弹 shell（/dev/tcp）'               => '/dev/tcp/',
             '反弹 shell（nc 或 mkfifo）'           => '/bin/',
             '反弹 shell（fsockopen 配合 /bin/sh）' => 'fsockopen',
+            '从远程地址取内容后 eval 执行'         => 'eval',
         );
         foreach (self::high_patterns() as $label => $re) {
             if (!$has_req) {
@@ -468,6 +518,12 @@ trait IO_VC_Signatures {
         }
         if (self::escaped_dangerous_name($data)) {
             return '函数名用 \\x 转义藏起来';
+        }
+        if (self::hex_decode_eval($data)) {
+            return '自己写的十六进制解码后 eval 执行';
+        }
+        if (self::seo_cloak($data)) {
+            return '黑帽 SEO：按搜索引擎爬虫返回远程内容';
         }
         if (stripos($data, 'MARIJuANA') !== false && preg_match('/\$_(?:FILES|GET|POST)\b/', $data)) {
             return '已知 WebShell：MARIJuANA 文件管理器';

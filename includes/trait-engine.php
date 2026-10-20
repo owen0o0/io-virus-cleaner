@@ -114,7 +114,7 @@ trait IO_VC_Engine {
                     }
                     break;
                 case 'dir':
-                    self::job_dir($item[1], $state);
+                    self::job_dir($item[1], $state, !empty($item[2]));
                     break;
                 case 'core':
                     self::core_check_root($item[1], $state);
@@ -129,7 +129,11 @@ trait IO_VC_Engine {
         return true;
     }
 
-    private static function job_dir($dir, &$state) {
+    /**
+     * $php_only：在 cache 目录里只看 PHP 类文件和已知木马文件名。
+     * 缓存目录里全是页面缓存，逐个读内容太慢；但木马常藏在里面，所以进去，只查 PHP 文件。
+     */
+    private static function job_dir($dir, &$state, $php_only = false) {
         $list = @scandir($dir, SCANDIR_SORT_NONE);
         if (!is_array($list)) {
             if (count($state['unreadable']) < 50) {
@@ -146,8 +150,12 @@ trait IO_VC_Engine {
             if (is_dir($path)) {
                 // 不跟随符号链接，剪掉 vendor、node_modules 等，不再进去枚举里面的几万个文件
                 if (!is_link($path) && !self::dir_skipped($name) && !self::excluded_name($name) && !self::excluded_path($path)) {
-                    $state['queue'][] = array('dir', $path);
+                    $only = $php_only || $name === 'cache';
+                    $state['queue'][] = $only ? array('dir', $path, 1) : array('dir', $path);
                 }
+                continue;
+            }
+            if ($php_only && !self::php_only_wanted($name)) {
                 continue;
             }
             self::consider($path, $state['found'], $state['seen']);
@@ -178,13 +186,18 @@ trait IO_VC_Engine {
         );
     }
 
+    private static function php_only_wanted($name) {
+        $ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
+        return in_array($ext, self::php_exts(), true) || self::name_matches($name) !== '';
+    }
+
     /**
      * 传入目录名（不是完整路径）。
      */
     private static function dir_skipped($name) {
         static $set = null;
         if ($set === null) {
-            $set = array_fill_keys(array('vendor', 'node_modules', '.git', 'io-virus-quarantine', 'io-cache-quarantine', 'cache', 'wflogs', 'wordfence', 'sucuri-scanner'), true);
+            $set = array_fill_keys(array('vendor', 'node_modules', '.git', 'io-virus-quarantine', 'io-cache-quarantine', 'wflogs', 'wordfence', 'sucuri-scanner'), true);
         }
         return isset($set[$name]);
     }
