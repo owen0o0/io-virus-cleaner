@@ -30,6 +30,7 @@ trait IO_VC_Signatures {
             'wlb_wpc_orig.bak',
             'nav-cache-helper.php',
             'io-compat.php',
+            'ppdd.php',
             'wx_seo.php',
             'wx_probe.php',
             'wx_navc_test.txt',
@@ -429,14 +430,32 @@ trait IO_VC_Signatures {
     }
 
     /**
-     * 自己写循环把十六进制字符串还原成代码再 eval：chr(hexdec(..)) 加 eval。
-     * 不依赖 hex2bin，所以和「十六进制字符串还原代码」那条互补。正常代码里 chr(hexdec()) 本来就少，再同时有 eval 几乎只有木马。
+     * 自己写循环把十六进制字符串还原成代码再执行：chr(hexdec(..)) 或 pack('C', hexdec(..))，
+     * 后面接 eval 或 create_function。不依赖 hex2bin，所以和「十六进制字符串还原代码」那条互补。
+     * 正常代码里很少有这种解码，再同时有 eval 或 create_function，几乎只有木马。
      */
     private static function hex_decode_eval($data) {
-        if (stripos($data, 'hexdec') === false || stripos($data, 'eval') === false) {
+        if (stripos($data, 'hexdec') === false || (stripos($data, 'eval') === false && stripos($data, 'create_function') === false)) {
             return false;
         }
-        return preg_match('/\bchr\s*\(\s*hexdec\s*\(/i', $data) && preg_match('/\beval\s*\(\s*@?\s*[$\w]/i', $data);
+        return preg_match('/\bchr\s*\(\s*hexdec\s*\(|\bpack\s*\(\s*[\'"]C\*?[\'"]\s*,\s*hexdec\s*\(/i', $data)
+            && preg_match('/\beval\s*\(\s*@?\s*[$\w]|\bcreate_function\s*\(/i', $data);
+    }
+
+    /**
+     * 哥斯拉（Godzilla）的 PHP 服务端：把载荷放进 $_SESSION，XOR 加 base64 通信，
+     * 回包用 substr(md5($pass.$key),0,16) 作首尾标记；载荷里一定有 getBasicsInfo。
+     */
+    private static function godzilla_shell($data) {
+        if (stripos($data, 'eval') === false) {
+            return false;
+        }
+        if (strpos($data, 'getBasicsInfo') !== false) {
+            return true;
+        }
+        return strpos($data, '$_SESSION') !== false
+            && preg_match('/substr\s*\(\s*md5\s*\(\s*\$\w+\s*\.\s*\$\w+\s*\)\s*,\s*0\s*,\s*16\s*\)/', $data)
+            && preg_match('/\beval\s*\(\s*@?\s*\$\w+\s*\)/i', $data);
     }
 
     /**
@@ -518,6 +537,16 @@ trait IO_VC_Signatures {
             return '';
         }
 
+        // 文件头伪装成图片（GIF89a、JPEG、PNG）但后面是 PHP 代码：正常 PHP 文件不会这样，直接算高可信
+        if (preg_match('/^(?:GIF8[79]a|\xFF\xD8\xFF|\x89PNG)/', $data)
+            && (strpos($data, '<?php') !== false || strpos($data, '<?=') !== false)) {
+            return '文件头伪装成图片的 PHP 文件';
+        }
+        // 空注释 /**/ 常被塞进函数名和括号之间躲关键字搜索：Create_Function/**/('', $x)。去掉再匹配
+        if (strpos($data, '/**/') !== false) {
+            $data = str_replace('/**/', '', $data);
+        }
+
         // 先用便宜的字符串查找挡掉绝大多数正常文件，再跑正则
         $has_req = strpos($data, '$_') !== false;
         $no_req  = array(
@@ -548,7 +577,10 @@ trait IO_VC_Signatures {
             return '函数名用 \\x 转义藏起来';
         }
         if (self::hex_decode_eval($data)) {
-            return '自己写的十六进制解码后 eval 执行';
+            return '自己写的十六进制解码后执行（eval 或 create_function）';
+        }
+        if (self::godzilla_shell($data)) {
+            return '已知 WebShell：哥斯拉（Godzilla）';
         }
         if (self::custom_decoder_eval($data)) {
             return '自定义解码函数加 eval 执行（加密外壳）';
