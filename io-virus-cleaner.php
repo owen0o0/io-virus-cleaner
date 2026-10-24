@@ -2,7 +2,7 @@
 /**
  * Plugin Name: IO Virus Cleaner
  * Description: WordPress 病毒和木马扫描清理：按文件名、内容特征和通用 webshell 写法识别，可以扫描整个 wwwroot，支持命令行。
- * Version: 1.2.6
+ * Version: 1.2.7
  * Author: 一为
  * Author URI: https://www.iotheme.cn/
  * Requires at least: 5.8
@@ -36,6 +36,7 @@ require_once IO_VC_DIR . '/includes/trait-engine.php';       // 分步扫描引�
 require_once IO_VC_DIR . '/includes/trait-core-check.php';   // WordPress 核心文件校验（可选，要联网）
 require_once IO_VC_DIR . '/includes/trait-cron.php';         // 计划任务：每天自动扫描
 require_once IO_VC_DIR . '/includes/trait-quarantine.php';   // 隔离区
+require_once IO_VC_DIR . '/includes/trait-hardening.php';    // 临时加固：wp2shell（未认证 batch/v1 RCE）
 
 final class IO_Virus_Cleaner {
     use IO_VC_Updater;
@@ -50,8 +51,9 @@ final class IO_Virus_Cleaner {
     use IO_VC_CoreCheck;
     use IO_VC_Cron;
     use IO_VC_Quarantine;
+    use IO_VC_Hardening;
 
-    const VERSION = '1.2.6';
+    const VERSION = '1.2.7';
     const SLUG    = 'io-virus-cleaner';
     const UPDATE_URI  = 'https://github.com/owen0o0/io-virus-cleaner';
     const UPDATE_API  = 'https://api.github.com/repos/owen0o0/io-virus-cleaner/releases/latest';
@@ -82,6 +84,8 @@ final class IO_Virus_Cleaner {
             if (function_exists('register_deactivation_hook')) {
                 register_deactivation_hook(IO_VC_FILE, array(__CLASS__, 'cron_clear'));
             }
+            // wp2shell：拦住未登录对 /batch/v1 的访问，前台也要生效
+            self::harden_boot();
         }
         if (!is_admin()) {
             return;
