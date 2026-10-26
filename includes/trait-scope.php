@@ -97,7 +97,7 @@ trait IO_VC_Scope {
     private static function path_allowed($real) {
         if (self::$allowed_prefixes === null) {
             self::$allowed_prefixes = array();
-            foreach (array_merge(array(realpath(ABSPATH)), self::upload_roots(), self::temp_roots(), self::extra_dirs()) as $root) {
+            foreach (array_merge(array(realpath(ABSPATH)), self::upload_roots(), self::temp_roots(), self::home_roots(), self::extra_dirs()) as $root) {
                 if ($root) {
                     self::$allowed_prefixes[] = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
                 }
@@ -289,6 +289,23 @@ trait IO_VC_Scope {
             if ($real && is_dir($real)) {
                 $roots[$real] = $real;
             }
+        }
+        return $cache = array_values($roots);
+    }
+
+    /**
+     * 用户家目录：远控常放在 /home/www/.cache，bash 历史也在这里。
+     * 存在才加入；用 dir 队列整棵扫（比临时目录的浅扫更深，才能进到 .cache）。
+     */
+    private static function home_roots() {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $roots = array();
+        $real  = @realpath('/home');
+        if ($real && is_dir($real)) {
+            $roots[$real] = $real;
         }
         return $cache = array_values($roots);
     }

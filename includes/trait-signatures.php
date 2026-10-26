@@ -207,6 +207,39 @@ trait IO_VC_Signatures {
         return false;
     }
 
+    /**
+     * Shell 历史或脚本里用 base64 解码写出 .php：常见于远控 silent_exec 落马。
+     * 只查历史文件和 shell 脚本，避免扫到普通文档里的讲解文字。
+     */
+    private static function shell_drop_php($path) {
+        $name = strtolower(basename($path));
+        $ext  = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+        $hist = array(
+            '.bash_history' => true, '.zsh_history' => true, '.sh_history' => true,
+            'bash_history' => true, 'zsh_history' => true, 'history' => true,
+        );
+        if (!isset($hist[$name]) && !in_array($ext, array('sh', 'bash', 'zsh', 'history'), true)) {
+            return '';
+        }
+        $size = @filesize($path);
+        if ($size === false || $size < 20 || $size > 2097152) {
+            return '';
+        }
+        $data = self::read_small($path, 2097152);
+        if ($data === '' || stripos($data, 'base64') === false) {
+            return '';
+        }
+        // echo "..." | base64 -d > xxx.php   或   base64 -d < ... > xxx.php
+        if (preg_match('/base64\s+(?:-d|--decode|--decode=.*?|-[a-z]*d[a-z]*)\b[^\n]{0,120}>\s*\S+\.php\b/i', $data)) {
+            return 'Shell 历史：用 base64 解码写入 PHP 文件';
+        }
+        if (preg_match('/base64\s+(?:-d|--decode)\b[^\n]{0,80}\.php\b/i', $data)
+            && preg_match('/(?:tee|redirect|>)\s*\S*\.php\b|\.php\b[^\n]{0,40}(?:tee|>)/i', $data)) {
+            return 'Shell 历史：用 base64 解码写入 PHP 文件';
+        }
+        return '';
+    }
+
     private static function content_matches($path) {
         $size = @filesize($path);
         if ($size === false || $size < 1 || !self::should_read_content($path, $size)) {
@@ -295,6 +328,9 @@ trait IO_VC_Signatures {
         }
         if ($reason === '') {
             $reason = self::content_matches($real);
+        }
+        if ($reason === '') {
+            $reason = self::shell_drop_php($real);
         }
         if ($reason === '') {
             $reason = self::behavior_matches($real);

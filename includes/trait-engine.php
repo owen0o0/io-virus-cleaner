@@ -16,7 +16,7 @@ trait IO_VC_Engine {
      *
      * 队列里每一项是 array(类型, 路径)：
      * known 已知木马路径；avatar 头像目录；data .data 目录；temp 临时目录；
-     * dir 普通目录（逐层展开，跳过 vendor 等）；glob 根目录下的 PHP 文件。
+     * dir 普通目录（逐层展开，跳过 vendor 等；/home 也走这个）；glob 根目录下的 PHP 文件。
      */
     private static function job_new() {
         $dirs = array_merge(
@@ -29,6 +29,7 @@ trait IO_VC_Engine {
                 ABSPATH . 'wp-includes',
             ),
             self::upload_roots(),
+            self::home_roots(),
             self::extra_dirs()
         );
         $queue = array(array('known', ''));

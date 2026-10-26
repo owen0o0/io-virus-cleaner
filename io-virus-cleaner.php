@@ -2,7 +2,7 @@
 /**
  * Plugin Name: IO Virus Cleaner
  * Description: WordPress 病毒和木马扫描清理：按文件名、内容特征和通用 webshell 写法识别，可以扫描整个 wwwroot，支持命令行。
- * Version: 1.2.9
+ * Version: 1.2.10
  * Author: 一为
  * Author URI: https://www.iotheme.cn/
  * Requires at least: 5.8
@@ -53,7 +53,7 @@ final class IO_Virus_Cleaner {
     use IO_VC_Quarantine;
     use IO_VC_Hardening;
 
-    const VERSION = '1.2.9';
+    const VERSION = '1.2.10';
     const SLUG    = 'io-virus-cleaner';
     const UPDATE_URI  = 'https://github.com/owen0o0/io-virus-cleaner';
     const UPDATE_API  = 'https://api.github.com/repos/owen0o0/io-virus-cleaner/releases/latest';
