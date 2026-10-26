@@ -19,16 +19,14 @@ trait IO_VC_Engine {
      * dir 普通目录（逐层展开，跳过 vendor 等；/home 也走这个）；glob 根目录下的 PHP 文件。
      */
     private static function job_new() {
+        // wp-content 整目录扫：plugins、themes、uploads、languages、mu-plugins 以及其它藏马目录都覆盖到
         $dirs = array_merge(
             array(
-                self::plugin_root(),
-                WP_CONTENT_DIR . '/mu-plugins',
-                WP_CONTENT_DIR . '/uploads',
-                WP_CONTENT_DIR . '/themes',
+                WP_CONTENT_DIR,
                 ABSPATH . 'wp-admin',
                 ABSPATH . 'wp-includes',
             ),
-            self::upload_roots(),
+            self::upload_roots(), // 自定义上传目录可能在 wp-content 外
             self::home_roots(),
             self::extra_dirs()
         );
@@ -47,7 +45,6 @@ trait IO_VC_Engine {
             $queue[] = array('dir', $dir);
         }
         $queue[] = array('glob', ABSPATH . '*.php');
-        $queue[] = array('glob', WP_CONTENT_DIR . '/*.php');
         // 核心文件校验（可选，要联网）：每个 WordPress 站点一项，排在最后
         $core_on = self::core_check_enabled();
         if ($core_on) {
