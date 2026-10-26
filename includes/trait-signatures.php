@@ -70,7 +70,15 @@ trait IO_VC_Signatures {
             'api-alibabacloud.com',
             '2a5ca507a02d8096a368fe13e7e488f55cdf2ba0bde15a7256a3f8273f568f3e',
             'HTTP_X_IO_NOTE',
+            'HTTP_X_IO_STAT',
             '.io_guard.sh',
+            '.io-guard.sh',
+            '.io-daemon.sh',
+            '/home/www/.cache/.ovl',
+            'ai.91nf.com',
+            'agent_linux',
+            'pgrep -x .ovl',
+            '[purgatory]',
         );
     }
 
