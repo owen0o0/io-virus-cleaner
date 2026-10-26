@@ -35,6 +35,11 @@ trait IO_VC_Signatures {
             'wx_probe.php',
             'wx_navc_test.txt',
             'rn_test_b.txt',
+            'io-perf-notes.php',
+            'io-perf-watch.php',
+            'io-notes.dat',
+            'io-watch.dat',
+            'funtin_com.php',
         );
     }
 
@@ -64,6 +69,8 @@ trait IO_VC_Signatures {
             'share.bceboss.com',
             'api-alibabacloud.com',
             '2a5ca507a02d8096a368fe13e7e488f55cdf2ba0bde15a7256a3f8273f568f3e',
+            'HTTP_X_IO_NOTE',
+            '.io_guard.sh',
         );
     }
 
@@ -459,6 +466,42 @@ trait IO_VC_Signatures {
     }
 
     /**
+     * 请求头后门：从自定义 HTTP 头取出内容，hex2bin/gzinflate 解码后写进旁边的 .dat，或 include 执行。
+     * 不走 GET/POST，普通 WAF 和日志里不容易看见。
+     */
+    private static function header_payload_loader($data) {
+        if (strpos($data, '$_SERVER') === false || stripos($data, 'HTTP_') === false) {
+            return false;
+        }
+        if (!preg_match('/\$_SERVER\s*\[\s*[\'"]HTTP_[A-Z0-9_]+[\'"]\s*\]/', $data)) {
+            return false;
+        }
+        $decode = (stripos($data, 'hex2bin') !== false || stripos($data, 'base64_decode') !== false)
+            && (stripos($data, 'gzinflate') !== false || stripos($data, 'gzuncompress') !== false || stripos($data, 'gzdecode') !== false);
+        if (!$decode) {
+            return false;
+        }
+        return stripos($data, 'file_put_contents') !== false
+            || preg_match('/\b(?:include|require)(?:_once)?\b/i', $data);
+    }
+
+    /**
+     * 经 Unix socket 直连 PHP-FPM，用 PHP_ADMIN_VALUE 把 sendmail_path 改成任意 shell。
+     * 触发 mail() 时就会跑攻击者的脚本，常用来绕过 open_basedir 或保活远控进程。
+     */
+    private static function fcgi_sendmail_escape($data) {
+        if (stripos($data, 'sendmail_path') === false || stripos($data, 'PHP_ADMIN_VALUE') === false) {
+            return false;
+        }
+        if (stripos($data, 'stream_socket_client') === false && stripos($data, 'fsockopen') === false) {
+            return false;
+        }
+        // FastCGI 记录头：version=1, type=1(BEGIN_REQUEST) 或 type=4(PARAMS)
+        return strpos($data, '\x01\x01') !== false || strpos($data, '\x01\x04') !== false
+            || preg_match('/unix:\/\/[^\'"]*(?:php|fpm|cgi)/i', $data);
+    }
+
+    /**
      * 加密外壳：自己写一个解码函数（base64、gzip 解压，再逐字节 chr(ord(..)-1) 移位），解出来的变量直接 eval。
      * 常见于被注入到 index.php 开头的 SEO 劫持代码。要同时有解压或解码调用、字符移位和 eval($变量) 三样。
      */
@@ -529,11 +572,17 @@ trait IO_VC_Signatures {
         if (in_array($ext, self::image_exts(), true)) {
             return self::image_php_matches($path, $size);
         }
-        if (!in_array($ext, self::php_exts(), true) || $size > 1048576) {
+        // .dat 常被用来藏 PHP 载荷（例如 io-notes.dat）；内容以 <?php 开头才当 PHP 扫
+        $php_like = in_array($ext, self::php_exts(), true)
+            || ($ext === 'dat' && $size <= 1048576);
+        if (!$php_like || $size > 1048576) {
             return '';
         }
         $data = self::read_small($path);
         if ($data === '') {
+            return '';
+        }
+        if ($ext === 'dat' && strpos($data, '<?php') === false && strpos($data, '<?=') === false) {
             return '';
         }
 
@@ -581,6 +630,12 @@ trait IO_VC_Signatures {
         }
         if (self::godzilla_shell($data)) {
             return '已知 WebShell：哥斯拉（Godzilla）';
+        }
+        if (self::header_payload_loader($data)) {
+            return '请求头写入或加载隐藏 PHP 载荷';
+        }
+        if (self::fcgi_sendmail_escape($data)) {
+            return 'FastCGI 配合 sendmail_path 提权逃逸';
         }
         if (self::custom_decoder_eval($data)) {
             return '自定义解码函数加 eval 执行（加密外壳）';
