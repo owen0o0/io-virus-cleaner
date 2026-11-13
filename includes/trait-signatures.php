@@ -371,6 +371,14 @@ trait IO_VC_Signatures {
             // 地址放在变量里的远控信标：curl_exec 取回任务，后面不远就 eval($变量)
             '请求远程地址后 eval 执行结果' => '/\bcurl_exec\s*\([^;]{0,80};[\s\S]{0,1500}?\beval\s*\(\s*@?\s*\$\w+\s*\)/i',
             '反弹 shell（fsockopen 配合 /bin/sh）' => '/\bfsockopen\s*\([^;]{0,200}\)\s*;[\s\S]{0,600}?\b(?:proc_open|popen|exec|shell_exec|system|passthru)\s*\([^;]{0,120}\/bin\/(?:ba)?sh/i',
+            // 读取或遍历 PHP 会话文件（sess_*、session.save_path）：会话里有验证码、登录状态，请求参数还决定读哪个
+            '按请求参数读取或遍历 PHP 会话文件' => '/\b(?:file_get_contents|readfile|fopen|file|glob|scandir|opendir|show_source|highlight_file)\s*\((?:[^;]{0,200}(?:sess_|session_save_path\s*\(|session\.save_path)[^;]{0,200}' . $sg . '\b|[^;]{0,200}' . $sg . '\b[^;]{0,200}(?:sess_|session_save_path\s*\(|session\.save_path))/i',
+            // 暗号后门：把请求参数做哈希，和写死在代码里的哈希值比对，对上了才执行后面的动作
+            '请求参数哈希后和写死的值比对（暗号后门）' => '/\b(?:md5|sha1)\s*\(\s*(?:\(\s*string\s*\)\s*)?@?' . $sg . '\s*\[[^\]]+\]\s*\)\s*={2,3}\s*[\'"][0-9a-f]{32,40}[\'"]|\bhash\s*\(\s*[\'"][a-z0-9]+[\'"]\s*,\s*(?:\(\s*string\s*\)\s*)?@?' . $sg . '\s*\[[^\]]+\]\s*\)\s*={2,3}\s*[\'"][0-9a-f]{40,128}[\'"]|[\'"][0-9a-f]{32,128}[\'"]\s*={2,3}\s*(?:md5|sha1|hash)\s*\([^;]{0,60}' . $sg . '\s*\[/i',
+            // MySQL UDF 提权：WebShell 里常带 CREATE FUNCTION sys_eval ... SONAME；不需要请求参数
+            'MySQL UDF 提权（CREATE FUNCTION … SONAME）' => '/CREATE\s+FUNCTION\s+\w+\s+RETURNS\s+(?:STRING|INTEGER)\s+SONAME/i',
+            // 代码里夹着 base64 编码的 PHP 源码（以 PD9waHA 开头），解开后写成文件：自我修复、批量落地后门
+            '内嵌 base64 编码的 PHP 代码并写入文件' => '/[\'"]PD9waHA[A-Za-z0-9+\/=]{80,}[\'"][\s\S]{0,1500}?\bfile_put_contents\s*\(|\bfile_put_contents\s*\([^;]{0,120}base64_decode[\s\S]{0,2500}?[\'"]PD9waHA[A-Za-z0-9+\/=]{80,}[\'"]/i',
             // PHP 文件去 include 同目录的 .dat/.txt/图片：载荷藏在非 PHP 文件里，只留一个几行的加载器
             'include 同目录的非 PHP 数据文件' => '/\b(?:include|require)(?:_once)?\s*\(?\s*@?\s*(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*[\'"][^\'"\n]*\.(?:dat|txt|log|bak|tmp|jpe?g|png|gif|ico|webp)[\'"]/i',
             // eval($f($c))：函数名在变量里，请求内容经它处理后直接执行
@@ -390,6 +398,8 @@ trait IO_VC_Signatures {
             '可疑：遍历目录批量改文件时间' => '/function\s+\w+\s*\([^)]*\)\s*\{[^}]{0,300}scandir[\s\S]{0,400}@?touch\s*\(/i',
             '可疑：用客户端文件名保存上传' => '/move_uploaded_file\s*\([^;]*\$_FILES\s*\[[^\]]+\]\s*\[\s*[\'"]name[\'"]\s*\]/i',
             // 后门常在这里悄悄加一个管理员；正常的安装向导、会员插件也可能这样写，所以只算可疑
+            // 正常代码只会用 PHP 的会话接口，不会自己去翻会话目录；清理会话的工具偶尔会这样写，所以只算可疑
+            '可疑：直接读取或遍历 PHP 会话文件' => '/\b(?:file_get_contents|readfile|fopen|file|glob|scandir|opendir|show_source|highlight_file)\s*\([^;]{0,200}(?:[\'"\/]sess_|session_save_path\s*\(|ini_get\s*\(\s*[\'"]session\.save_path)/i',
             '可疑：代码里直接创建管理员' => '/\b(?:wp_create_user|wp_insert_user|wp_update_user)\s*\([^;]{0,300}[\'"]administrator[\'"]/i',
         );
     }
@@ -640,17 +650,23 @@ trait IO_VC_Signatures {
         if (in_array($ext, self::image_exts(), true)) {
             return self::image_php_matches($path, $size);
         }
-        // .dat 常被用来藏 PHP 载荷（例如 io-notes.dat）；内容以 <?php 开头才当 PHP 扫
-        $php_like = in_array($ext, self::php_exts(), true)
-            || ($ext === 'dat' && $size <= 1048576);
+        // .dat、.bak 常被用来藏 PHP 载荷或备份被改过的配置；临时目录里的无扩展名文件是 PHP 解出来的临时载荷。
+        // 这些文件只在开头带 <?php 时才当 PHP 扫
+        $is_php  = in_array($ext, self::php_exts(), true);
+        $php_like = $is_php
+            || in_array($ext, array('dat', 'bak', 'old', 'orig', 'save', 'tmp'), true)
+            || ($ext === '' && self::under_temp($path));
         if (!$php_like || $size > 1048576) {
             return '';
         }
+        if (!$is_php) {
+            $head = @file_get_contents($path, false, null, 0, 256);
+            if (!is_string($head) || (strpos($head, '<?php') === false && strpos($head, '<?=') === false)) {
+                return '';
+            }
+        }
         $data = self::read_small($path);
         if ($data === '') {
-            return '';
-        }
-        if ($ext === 'dat' && strpos($data, '<?php') === false && strpos($data, '<?=') === false) {
             return '';
         }
 
@@ -675,6 +691,8 @@ trait IO_VC_Signatures {
             '从远程地址取内容后 eval 执行'         => 'eval',
             '请求远程地址后 eval 执行结果'         => 'eval',
             'include 同目录的非 PHP 数据文件'      => '',
+            'MySQL UDF 提权（CREATE FUNCTION … SONAME）' => 'SONAME',
+            '内嵌 base64 编码的 PHP 代码并写入文件' => 'PD9waHA',
         );
         foreach (self::high_patterns() as $label => $re) {
             if (!$has_req) {
@@ -743,6 +761,7 @@ trait IO_VC_Signatures {
             '可疑：用客户端文件名保存上传' => 'move_uploaded_file',
             '可疑：遍历目录批量改文件时间' => 'touch',
             '可疑：代码里直接创建管理员'   => 'administrator',
+            '可疑：直接读取或遍历 PHP 会话文件' => 'sess',
         );
         $suspect = '';
         foreach (self::suspect_patterns() as $label => $re) {
