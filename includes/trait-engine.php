@@ -307,7 +307,9 @@ trait IO_VC_Engine {
             get_template_directory() . '/functions.php',
             get_stylesheet_directory() . '/functions.php',
         );
-        $needles = self::names();
+        // 这些文件里不该出现已知木马特征，也不该去 include 非 PHP 的数据文件
+        $needles = self::markers();
+        $data_re = '/\b(?:include|require)(?:_once)?\s*\(?\s*@?\s*(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*[\'"][^\'"\n]*\.(?:dat|txt|log|bak|tmp|jpe?g|png|gif|ico|webp)[\'"]/i';
         $refs    = array();
         foreach (array_unique($targets) as $path) {
             if (!is_file($path) || filesize($path) > 1048576) {
@@ -318,16 +320,21 @@ trait IO_VC_Engine {
                 continue;
             }
             foreach ($lines as $n => $line) {
-                $norm = self::normalize_name($line);
-                foreach ($needles as $needle) {
-                    if (strpos($norm, $needle) !== false) {
-                        $refs[] = array(
-                            'path' => $path,
-                            'line' => $n + 1,
-                            'text' => function_exists('mb_substr') ? mb_substr($line, 0, 180) : substr($line, 0, 180),
-                        );
-                        break;
+                $hit = preg_match($data_re, $line) === 1;
+                if (!$hit) {
+                    foreach ($needles as $needle) {
+                        if (strpos($line, $needle) !== false) {
+                            $hit = true;
+                            break;
+                        }
                     }
+                }
+                if ($hit) {
+                    $refs[] = array(
+                        'path' => $path,
+                        'line' => $n + 1,
+                        'text' => function_exists('mb_substr') ? mb_substr($line, 0, 180) : substr($line, 0, 180),
+                    );
                 }
             }
         }

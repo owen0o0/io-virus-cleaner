@@ -10,39 +10,6 @@ if (!defined('ABSPATH')) {
 }
 
 trait IO_VC_Signatures {
-    private static function names() {
-        return array(
-            'io-cache-helper.php',
-            'io-perf-helper.php',
-            'io-perf-monitor.php',
-            'io-assets-cache.php',
-            'io-thumb-cache.php',
-            'gen_x.php',
-            'gen_wlb.php',
-            'c2io.php',
-            'io-sh.php',
-            'pwn.so',
-            'wlb_run.php',
-            'wlb_cmd.txt',
-            'wlb_probe.php',
-            'wlb_xff_probe.php',
-            'wlb_users.txt',
-            'wlb_wpc_orig.bak',
-            'nav-cache-helper.php',
-            'io-compat.php',
-            'ppdd.php',
-            'wx_seo.php',
-            'wx_probe.php',
-            'wx_navc_test.txt',
-            'rn_test_b.txt',
-            'io-perf-notes.php',
-            'io-perf-watch.php',
-            'io-notes.dat',
-            'io-watch.dat',
-            'funtin_com.php',
-        );
-    }
-
     private static function markers() {
         static $list = null;
         if ($list !== null) {
@@ -76,6 +43,8 @@ trait IO_VC_Signatures {
             '.io-daemon.sh',
             '/home/www/.cache/.ovl',
             'ai.91nf.com',
+            '120.27.149.199',
+            'tgrelay64023',
             'agent_linux',
             'pgrep -x .ovl',
             '[purgatory]',
@@ -88,9 +57,6 @@ trait IO_VC_Signatures {
 
     private static function name_matches($basename) {
         $name = self::normalize_name($basename);
-        if (in_array($name, self::names(), true)) {
-            return '文件名';
-        }
         if (preg_match('/_io_[cx]\.php$/i', $name)) {
             return '头像目录木马文件名';
         }
@@ -402,7 +368,15 @@ trait IO_VC_Signatures {
             '反弹 shell（nc 或 mkfifo）'   => '/\bnc(?:at)?\s+(?:-\w+\s+)*-e\s+\/bin\/(?:ba)?sh|\bmkfifo\s+\/tmp\/\w+[\s\S]{0,80}\/bin\/(?:ba)?sh\s+-i/i',
             // 远控信标：向外部地址发请求，拿回任务后 eval；不需要请求参数
             '从远程地址取内容后 eval 执行' => '/\b(?:file_get_contents|curl_init)\s*\(\s*@?\s*[\'"]https?:\/\/[^;]{0,200};[\s\S]{0,1500}?\beval\s*\(\s*@?\s*\$\w+\s*\)/i',
+            // 地址放在变量里的远控信标：curl_exec 取回任务，后面不远就 eval($变量)
+            '请求远程地址后 eval 执行结果' => '/\bcurl_exec\s*\([^;]{0,80};[\s\S]{0,1500}?\beval\s*\(\s*@?\s*\$\w+\s*\)/i',
             '反弹 shell（fsockopen 配合 /bin/sh）' => '/\bfsockopen\s*\([^;]{0,200}\)\s*;[\s\S]{0,600}?\b(?:proc_open|popen|exec|shell_exec|system|passthru)\s*\([^;]{0,120}\/bin\/(?:ba)?sh/i',
+            // PHP 文件去 include 同目录的 .dat/.txt/图片：载荷藏在非 PHP 文件里，只留一个几行的加载器
+            'include 同目录的非 PHP 数据文件' => '/\b(?:include|require)(?:_once)?\s*\(?\s*@?\s*(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*[\'"][^\'"\n]*\.(?:dat|txt|log|bak|tmp|jpe?g|png|gif|ico|webp)[\'"]/i',
+            // eval($f($c))：函数名在变量里，请求内容经它处理后直接执行
+            '变量函数处理后 eval 执行'     => '/\beval\s*\(\s*@?\s*\$\w+\s*\(\s*@?\s*\$\w+\s*\)\s*\)/i',
+            // $p=$_POST['x']; $c=@$g($h($p)); eval($c); 请求内容转了两手才进 eval
+            '请求参数经多次变量转手后 eval' => '/\$(\w+)\s*=\s*[^;\'"]{0,100}' . $sg . '\b[^;]*;[\s\S]{0,400}?\$(\w+)\s*=\s*[^;]{0,80}\$\1\b[^;]*;[\s\S]{0,300}?\b(?:eval|assert)\s*\(\s*@?\s*(?:\w+\s*\(\s*)*@?\$\2\b/i',
         );
     }
 
@@ -491,6 +465,56 @@ trait IO_VC_Signatures {
         }
         return preg_match('/\bchr\s*\(\s*hexdec\s*\(|\bpack\s*\(\s*[\'"]C\*?[\'"]\s*,\s*hexdec\s*\(/i', $data)
             && preg_match('/\beval\s*\(\s*@?\s*[$\w]|\bcreate_function\s*\(/i', $data);
+    }
+
+    /**
+     * 'ba'.'se'.'64_'.'de'.'code'、'hex'.'2bin' 这种把危险函数名拆开再拼：
+     * 拼出来恰好是危险函数名，正常代码没有理由这样写。
+     */
+    private static function concat_func_names($data) {
+        if (!preg_match('/[\'"]\s*\.\s*[\'"]/', $data)) {
+            return false;
+        }
+        if (!preg_match_all('/(?:[\'"][A-Za-z0-9_]{1,12}[\'"]\s*\.\s*){1,8}[\'"][A-Za-z0-9_]{1,12}[\'"]/', $data, $m)) {
+            return false;
+        }
+        static $bad = array(
+            'base64_decode', 'gzinflate', 'gzuncompress', 'gzdecode', 'hex2bin', 'str_rot13', 'eval', 'assert',
+            'system', 'exec', 'shell_exec', 'passthru', 'popen', 'proc_open', 'create_function',
+            'file_put_contents', 'call_user_func', 'call_user_func_array', 'preg_replace', 'curl_exec',
+        );
+        foreach ($m[0] as $expr) {
+            $plain = strtolower(preg_replace('/[\'"\s.]/', '', $expr));
+            if (in_array($plain, $bad, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * array_map($f[0], array($x)) 反复出现：函数名不写在代码里，而是从解码出来的数组里取。
+     * 加密外壳用它躲开关键字搜索，正常代码不这样调用。
+     */
+    private static function array_map_dynamic($data) {
+        if (strpos($data, 'array_map') === false) {
+            return false;
+        }
+        return preg_match_all('/\barray_map\s*\(\s*\$\w+\s*\[\s*\d+\s*\]\s*,\s*array\s*\(/i', $data) >= 2;
+    }
+
+    /**
+     * 文件里是一大段分行写的编码字符串（base64、rot13 后的文本），再配手写的 ord/chr 解码循环，
+     * 最后 include 临时文件或 eval：典型的加密外壳。内嵌图片、字体的数据文件不会有解码后执行这一步。
+     */
+    private static function encoded_blob_loader($data) {
+        if (strlen($data) < 8000 || strpos($data, 'ord(') === false || strpos($data, 'chr(') === false) {
+            return false;
+        }
+        if (preg_match_all('/[\'"][A-Za-z0-9+\/=|_]{1000,}[\'"]/', $data) < 3) {
+            return false;
+        }
+        return preg_match('/\binclude(?:_once)?\s+\$\w+\s*;|\beval\s*\(/i', $data) === 1;
     }
 
     /**
@@ -649,6 +673,8 @@ trait IO_VC_Signatures {
             '反弹 shell（nc 或 mkfifo）'           => '/bin/',
             '反弹 shell（fsockopen 配合 /bin/sh）' => 'fsockopen',
             '从远程地址取内容后 eval 执行'         => 'eval',
+            '请求远程地址后 eval 执行结果'         => 'eval',
+            'include 同目录的非 PHP 数据文件'      => '',
         );
         foreach (self::high_patterns() as $label => $re) {
             if (!$has_req) {
@@ -671,6 +697,15 @@ trait IO_VC_Signatures {
         }
         if (self::hex_decode_eval($data)) {
             return '自己写的十六进制解码后执行（eval 或 create_function）';
+        }
+        if (self::concat_func_names($data)) {
+            return '危险函数名拆成字符串拼接来躲检测';
+        }
+        if (self::array_map_dynamic($data)) {
+            return '用 array_map 调用解码出来的函数名（加密外壳）';
+        }
+        if (self::encoded_blob_loader($data)) {
+            return '超长编码字符串加解码循环后执行（加密外壳）';
         }
         if (self::godzilla_shell($data)) {
             return '已知 WebShell：哥斯拉（Godzilla）';
